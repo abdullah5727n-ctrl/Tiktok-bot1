@@ -1,7 +1,5 @@
-from flask import Flask, render_template_string, jsonify, send_file
+from flask import Flask, render_template_string, jsonify
 import random
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, AudioFileClip
-from gtts import gTTS
 
 app = Flask(__name__)
 
@@ -11,17 +9,18 @@ app = Flask(__name__)
 ideas = [
     "3 أشياء مستحيل تعرفها 😳",
     "سر خطير محد يقولك 🔥",
-    "وش يصير لو ما نمت 48 ساعة؟ 😨",
-    "أغرب شيء ممكن تشوفه 🤯"
+    "وش يصير لو ما نمت يومين؟ 😨",
+    "أغرب حقيقة في العالم 🤯",
+    "معلومة راح تغير حياتك 🔥"
 ]
 
 scripts = [
-    ["هل تعلم أن...", "في شيء مرعب...", "تابع للنهاية 😳"],
+    ["هل تعلم أن...", "في شيء غريب...", "تابع للنهاية 😳"],
     ["99% ما يعرفون...", "لكن الحقيقة...", "صدمة 🔥"],
     ["هذا الشيء خطير...", "انتبه له...", "لا تسوي كذا 😨"]
 ]
 
-current = {"idea":"", "script":[]}
+current = {"idea": "", "script": []}
 
 # ===============================
 # GENERATE
@@ -33,81 +32,80 @@ def generate():
     return jsonify(current)
 
 # ===============================
-# VIDEO LEGENDARY
-# ===============================
-@app.route("/video")
-def video():
-    text = current["idea"] + ". " + " ".join(current["script"])
-
-    # صوت
-    tts = gTTS(text=text, lang='ar')
-    tts.save("voice.mp3")
-
-    audio = AudioFileClip("voice.mp3")
-
-    # خلفية فيديو
-    bg = VideoFileClip("bg.mp4").subclip(0, 10).resize((720,1280))
-
-    # نص
-    txt = TextClip(text, fontsize=60, color='white', method='caption', size=(650,1000))
-    txt = txt.set_position("center").set_duration(10)
-
-    # دمج
-    final = CompositeVideoClip([bg, txt])
-    final = final.set_audio(audio)
-
-    final.write_videofile("output.mp4", fps=24)
-
-    return jsonify({"status":"done"})
-
-# ===============================
-# DOWNLOAD
-# ===============================
-@app.route("/download")
-def download():
-    return send_file("output.mp4", as_attachment=True)
-
-# ===============================
-# UI
+# UI (Legendary Purple)
 # ===============================
 HTML = """
 <!DOCTYPE html>
-<html dir="rtl">
+<html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>Legendary AI</title>
+<title>Legendary Dashboard</title>
 <style>
-body {background:#0f0c29;color:#fff;font-family:sans-serif;text-align:center}
-h1 {color:#9d50bb;font-size:40px}
-button {padding:15px;margin:10px;border:none;border-radius:10px;
-background:linear-gradient(135deg,#9d50bb,#6e48aa);color:#fff;font-size:16px;cursor:pointer}
-.box {background:#1f1c3d;padding:20px;border-radius:15px;margin:20px}
+body {
+    margin:0;
+    font-family:sans-serif;
+    background: linear-gradient(135deg,#0f0c29,#302b63,#24243e);
+    color:#fff;
+    text-align:center;
+}
+h1 {
+    font-size:40px;
+    background:linear-gradient(135deg,#9d50bb,#6e48aa);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+}
+.container {
+    padding:30px;
+}
+.card {
+    background:#1f1c3d;
+    padding:20px;
+    margin:20px auto;
+    border-radius:15px;
+    max-width:500px;
+    box-shadow:0 0 20px rgba(157,80,187,0.4);
+}
+button {
+    padding:15px 25px;
+    margin:10px;
+    border:none;
+    border-radius:10px;
+    background:linear-gradient(135deg,#9d50bb,#6e48aa);
+    color:#fff;
+    font-size:16px;
+    cursor:pointer;
+}
+button:hover {
+    transform:scale(1.05);
+}
+p {
+    font-size:18px;
+}
 </style>
 </head>
 <body>
 
-<h1>😈 Legendary TikTok AI</h1>
+<div class="container">
+<h1>🔥 Legendary AI Dashboard</h1>
 
-<div class="box">
-<button onclick="gen()">🎯 Generate</button>
+<div class="card">
+<button onclick="generate()">🎯 توليد فكرة</button>
 <p id="idea"></p>
 <div id="script"></div>
 </div>
 
-<div class="box">
-<button onclick="make()">🎬 Create Video</button>
-<button onclick="download()">📥 Download</button>
 </div>
 
 <script>
-function gen(){
-fetch('/generate').then(r=>r.json()).then(d=>{
-document.getElementById('idea').innerText=d.idea
-document.getElementById('script').innerHTML=d.script.map(x=>"<p>"+x+"</p>").join("")
-})
+function generate(){
+fetch('/generate')
+.then(res=>res.json())
+.then(data=>{
+document.getElementById('idea').innerText = data.idea;
+document.getElementById('script').innerHTML =
+data.script.map(x=>"<p>"+x+"</p>").join("");
+});
 }
-function make(){fetch('/video').then(()=>alert("🔥 تم إنشاء الفيديو"))}
-function download(){window.location='/download'}
 </script>
 
 </body>
@@ -122,4 +120,6 @@ def home():
 # RUN
 # ===============================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
