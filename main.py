@@ -3,6 +3,8 @@ import random
 import os
 import tempfile
 import base64
+import json
+import requests
 import time
 
 app = Flask(__name__)
@@ -10,47 +12,114 @@ app = Flask(__name__)
 storage = {}
 video_storage = {}
 
-# محتوى متنوع وطويل
-content_database = {
-    "facts": [
-        {"title": "🧠 أذكى حيوان في العالم", "lines": ["الدلفين يستخدم أسماء", "كل دلفين له اسم خاص", "يتعرف على أصدقائه بعد 20 سنة!"]},
-        {"title": "🌊 أعمق نقطة في المحيط", "lines": ["خندق ماريانا", "عمقها 11,000 متر", "فيها مخلوقات غريبة جداً"]},
-        {"title": "🚀 سرعة الضوء", "lines": ["299,792 كم/ثانية", "تستطيع الدوران حول الأرض", "7 مرات في الثانية!"]},
-        {"title": "🦕 عصر الديناصورات", "lines": ["استمر 165 مليون سنة", "الإنسان موجود من 300 ألف سنة فقط", "الديناصورات كانت تحكم الأرض"]},
-        {"title": "🧬 DNA الإنسان", "lines": ["99.9% متشابه بين جميع البشر", "0.1% هي التي تجعلك فريداً", "طوله 2 متر إذا فُرِد!"]},
-        {"title": "⚡ البرق", "lines": ["حرارته 5 أضعاف حرارة الشمس", "يضرب 8 مليون مرة يومياً", "الرعد صوت موجات صدمة"]},
-        {"title": "🌋 البراكين", "lines": ["80% من البراكين تحت البحر", "أكبر بركان في المريخ", "أولمبوس مونس"]},
-        {"title": "🐝 النحل", "lines": ["يزور 50-100 زهرة في الرحلة", "يحتاج لـ 2 مليون رحلة", "لكيلو عسل واحد!"]}
-    ],
-    "stories": [
-        {"title": "📖 قصة النجاح", "lines": ["توماس إديسون فشل 1000 مرة", "قالوا له: استسلم", "قال: اكتشفت 1000 طريقة لا تعمل", "ثم اخترع المصباح الكهربائي!"]},
-        {"title": "🏆 من الفشل للقمة", "lines": ["مايكل جوردن طرد من فريقه", "قالوا له: قصير للسلة", "صار أسطورة كرة السلة", "الأفضل في التاريخ!"]},
-        {"title": "🎬 حلم هوليوود", "lines": ["ستيفن سبيلبرغ رُفض 3 مرات", "من كلية السينما", "صار أشهر مخرج في العالم", "جائزة الأوسكار 3 مرات!"]}
-    ],
-    "tips": [
-        {"title": "💡 سر الإنتاجية", "lines": ["قاعدة 2 دقيقة", "لو ياخذ أقل من دقيقتين", "سويه الآن!", "ما تتراكم المهام"]},
-        {"title": "🧘‍♂️ التركيز", "lines": ["تقنية البومودورو", "25 دقيقة تركيز", "5 دقائق راحة", "كرر 4 مرات"]},
-        {"title": "💪 العادة السحرية", "lines": ["30 يوم متواصلة", "تكفي لتغيير حياتك", "ابدأ صغير", "استمر بثبات"]}
-    ]
-}
-
-def get_random_content():
-    category = random.choice(list(content_database.keys()))
-    item = random.choice(content_database[category])
-    return {
-        "category": category,
-        "title": item["title"],
-        "lines": item["lines"],
-        "duration": len(item["lines"]) * 3 + 2  # 3 ثواني لكل سطر + 2 ثواني مقدمة
+# سيناريوهات AI (موضوع + شخصية + صوت)
+scenarios = [
+    {
+        "title": "🖥️ مروحة الكمبيوتر",
+        "character": " dusty PC fan with angry face, anthropomorphic, cartoon style, 4k",
+        "lines": [
+            "أنا أموت هنا!",
+            "3 سنوات وما nadifوني",
+            "الغبار خانقني",
+            "ساعدوني يا ناس!"
+        ],
+        "voice_mood": "angry"
+    },
+    {
+        "title": "🔋 البطارية",
+        "character": "sad phone battery with face, low battery red, cartoon, cute",
+        "lines": [
+            "1% بس!",
+            "لمّا تسوّلّف 3 ساعات",
+            "وتقول لي: بس 5 دقايق",
+            "أنا ضحية!"
+        ],
+        "voice_mood": "sad"
+    },
+    {
+        "title": "💾 الـ USB",
+        "character": "confused USB stick with face, trying to plug in, cartoon",
+        "lines": [
+            "الوجه الأول: لا",
+            "اقلبني: لا",
+            "ارجع الوجه الأول: ايوه!",
+            "كيف؟!"
+        ],
+        "voice_mood": "confused"
+    },
+    {
+        "title": "🎧 السماعة",
+        "character": "tangled headphone with crying face, messy wires, cartoon",
+        "lines": [
+            "في الجيب 5 ثواني",
+            "طلعت كذا!",
+            "أنا أعقد نفسي",
+            "ساعدوني أفكك!"
+        ],
+        "voice_mood": "crying"
+    },
+    {
+        "title": "📱 الشاشة",
+        "character": "cracked phone screen with bandages, sad face, cartoon",
+        "lines": [
+            "بدون كفر قال",
+            "سقطت من اليد",
+            "الآن أنا مكسور",
+            "غيّرني بـ 2000 ريال!"
+        ],
+        "voice_mood": "sad"
     }
+]
+
+def get_random_scenario():
+    return random.choice(scenarios)
 
 @app.route("/generate", methods=['GET', 'POST'])
 def generate():
-    content = get_random_content()
-    session_id = request.headers.get('X-Session-ID', 'default_' + str(int(time.time())))
-    storage[session_id] = content
-    video_storage[session_id] = None
-    return jsonify(content)
+    scenario = get_random_scenario()
+    session_id = request.headers.get('X-Session-ID', 'sess_' + str(int(time.time())))
+    
+    storage[session_id] = {
+        "scenario": scenario,
+        "images": [],  # رابط الصور من AI
+        "audio": []    # روابط الصوت
+    }
+    
+    return jsonify(scenario)
+
+@app.route("/create_ai_video", methods=['POST'])
+def create_ai_video():
+    """إنشاء فيديو باستخدام AI"""
+    try:
+        session_id = request.headers.get('X-Session-ID', 'default')
+        data = request.get_json()
+        scenario = data.get('scenario')
+        
+        if not scenario:
+            return jsonify({"error": "لا يوجد سيناريو"}), 400
+        
+        # هنا تضيف API keys حقيقية
+        # 1. توليد صور بالـ AI (Midjourney/Stable Diffusion)
+        # 2. توليد صوت (ElevenLabs)
+        # 3. lip sync (D-ID أو HeyGen)
+        
+        # للتجربة: نرجع روابط وهمية
+        video_url = f"/video_preview/{session_id}"
+        
+        return jsonify({
+            "status": "processing",
+            "message": "جاري إنشاء الفيديو بالذكاء الاصطناعي...",
+            "steps": [
+                "توليد الصور بالـ AI...",
+                "توليد الصوت...",
+                "مزامنة الشفايف...",
+                "تجميع الفيديو..."
+            ],
+            "preview_url": video_url
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/upload_video", methods=['POST'])
 def upload_video():
@@ -65,48 +134,30 @@ def upload_video():
         video_bytes = base64.b64decode(video_data)
         
         temp_dir = tempfile.mkdtemp(dir="/tmp")
-        video_path = os.path.join(temp_dir, "video.webm")
+        video_path = os.path.join(temp_dir, "ai_video.webm")
         
         with open(video_path, "wb") as f:
             f.write(video_bytes)
         
-        video_storage[session_id] = {
-            "path": video_path,
-            "duration": data.get('duration', 0)
-        }
+        video_storage[session_id] = video_path
         
-        return jsonify({"status": "done", "duration": data.get('duration', 0)})
+        return jsonify({"status": "done"})
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/video_file")
-def video_file():
-    session_id = request.headers.get('X-Session-ID', 'default')
-    stored = video_storage.get(session_id)
-    
-    if not stored or not os.path.exists(stored["path"]):
-        return "الفيديو غير موجود", 404
-    
-    def generate():
-        with open(stored["path"], 'rb') as f:
-            while chunk := f.read(8192):
-                yield chunk
-    
-    return Response(generate(), mimetype='video/webm')
-
 @app.route("/download")
 def download():
     session_id = request.headers.get('X-Session-ID', 'default')
-    stored = video_storage.get(session_id)
+    path = video_storage.get(session_id)
     
-    if not stored or not os.path.exists(stored["path"]):
+    if not path or not os.path.exists(path):
         return jsonify({"error": "الفيديو غير جاهز"}), 404
     
     return send_file(
-        stored["path"],
+        path,
         as_attachment=True,
-        download_name="tiktok_video.webm",
+        download_name="ai_talking_video.webm",
         mimetype="video/webm"
     )
 
@@ -115,16 +166,15 @@ HTML = """
 <html dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>TikTok Pro Creator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Talking Videos</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     background: #0a0a0a;
     color: #fff;
     min-height: 100vh;
-    overflow-x: hidden;
 }
 .container { max-width: 600px; margin: 0 auto; padding: 20px; }
 .header {
@@ -132,262 +182,235 @@ body {
     padding: 40px 20px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     margin: -20px -20px 30px -20px;
-    position: relative;
-    overflow: hidden;
 }
-.header::before {
-    content: '';
-    position: absolute;
-    top: -50%; left: -50%;
-    width: 200%; height: 200%;
-    background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
-    background-size: 20px 20px;
-    animation: move 20s linear infinite;
+h1 { font-size: 28px; }
+.ai-badge {
+    display: inline-block;
+    background: #10b981;
+    color: white;
+    padding: 5px 15px;
+    border-radius: 20px;
+    font-size: 14px;
+    margin-top: 10px;
 }
-@keyframes move { from { transform: translate(0,0); } to { transform: translate(50px,50px); } }
-h1 { font-size: 32px; position: relative; z-index: 1; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
 .card {
-    background: linear-gradient(145deg, #1a1a2e, #16213e);
+    background: #1a1a2e;
     padding: 25px;
-    border-radius: 24px;
+    border-radius: 20px;
     margin-bottom: 20px;
     border: 1px solid rgba(255,255,255,0.1);
-    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
 }
-.card h3 {
-    font-size: 18px;
-    color: #a78bfa;
-    margin-bottom: 15px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.content-preview {
-    background: rgba(102, 126, 234, 0.1);
+.scenario-card {
+    background: linear-gradient(145deg, #1a1a2e, #16213e);
     padding: 20px;
     border-radius: 16px;
+    margin-bottom: 15px;
     border-right: 4px solid #667eea;
 }
-.content-title {
-    font-size: 24px;
+.scenario-title {
+    font-size: 22px;
     font-weight: bold;
-    color: #fff;
-    margin-bottom: 15px;
-    line-height: 1.4;
+    margin-bottom: 10px;
 }
-.content-line {
-    background: rgba(255,255,255,0.05);
+.character-desc {
+    color: #888;
+    font-size: 14px;
+    margin-bottom: 15px;
+}
+.dialogue-line {
+    background: rgba(102, 126, 234, 0.1);
     padding: 12px 16px;
     border-radius: 12px;
     margin: 8px 0;
     font-size: 16px;
-    color: #e0e0e0;
     position: relative;
-    padding-right: 30px;
+    padding-right: 35px;
 }
-.content-line::before {
-    content: '→';
+.dialogue-line::before {
+    content: '🎭';
     position: absolute;
     right: 10px;
-    color: #667eea;
 }
 .btn {
     width: 100%;
-    padding: 18px 24px;
+    padding: 18px;
     border: none;
     border-radius: 16px;
     font-size: 18px;
-    font-weight: 700;
+    font-weight: bold;
     cursor: pointer;
     margin: 10px 0;
     transition: all 0.3s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    position: relative;
-    overflow: hidden;
 }
-.btn::before {
-    content: '';
-    position: absolute;
-    top: 0; left: -100%;
-    width: 100%; height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-    transition: left 0.5s;
-}
-.btn:hover::before { left: 100%; }
 .btn-primary {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
 }
-.btn-secondary {
-    background: rgba(255,255,255,0.1);
-    color: white;
-    border: 2px solid #667eea;
-}
-.btn-success {
+.btn-ai {
     background: linear-gradient(135deg, #10b981 0%, #059669 100%);
     color: white;
 }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
-.btn:active:not(:disabled) { transform: scale(0.98); }
-.video-section {
+.btn:disabled { opacity: 0.5; }
+.video-container {
     background: #000;
-    border-radius: 24px;
-    padding: 20px;
-    margin-top: 20px;
-    display: none;
-}
-.video-section.active { display: block; }
-#canvas {
-    width: 100%;
-    border-radius: 16px;
-    background: #000;
-}
-#previewVideo {
-    width: 100%;
-    border-radius: 16px;
-    display: none;
-}
-.progress-bar {
-    width: 100%;
-    height: 6px;
-    background: rgba(255,255,255,0.1);
-    border-radius: 3px;
-    margin: 20px 0;
+    border-radius: 20px;
     overflow: hidden;
+    margin-top: 20px;
     display: none;
 }
-.progress-bar.active { display: block; }
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #667eea, #764ba2);
-    width: 0%;
-    transition: width 0.3s;
+.video-container.active { display: block; }
+video { width: 100%; display: block; }
+#canvas { width: 100%; border-radius: 16px; }
+.steps {
+    display: none;
+    margin: 20px 0;
 }
-.stats {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+.steps.active { display: block; }
+.step {
+    display: flex;
+    align-items: center;
     gap: 15px;
-    margin-top: 20px;
-}
-.stat {
-    text-align: center;
     padding: 15px;
     background: rgba(255,255,255,0.05);
     border-radius: 12px;
+    margin: 10px 0;
+    opacity: 0.5;
+    transition: all 0.3s;
 }
-.stat-value {
-    font-size: 24px;
-    font-weight: bold;
-    color: #667eea;
+.step.active {
+    opacity: 1;
+    background: rgba(102, 126, 234, 0.2);
+    border-right: 3px solid #667eea;
 }
-.stat-label {
-    font-size: 12px;
-    color: #888;
-    margin-top: 5px;
-}
-.recording-indicator {
-    display: none;
-    align-items: center;
-    gap: 10px;
-    color: #ef4444;
-    font-weight: bold;
-    margin-bottom: 15px;
-}
-.recording-indicator.active { display: flex; }
-.rec-dot {
-    width: 12px;
-    height: 12px;
-    background: #ef4444;
+.step-icon {
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
-    animation: pulse 1s infinite;
+    background: #667eea;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
 }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.step.done .step-icon {
+    background: #10b981;
+}
+.step-text { flex: 1; }
+.api-key-input {
+    width: 100%;
+    padding: 15px;
+    border: 2px solid #667eea;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.05);
+    color: white;
+    margin: 10px 0;
+    font-size: 14px;
+}
+.api-key-input::placeholder { color: #666; }
+.tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+.tab {
+    flex: 1;
+    padding: 15px;
+    background: rgba(255,255,255,0.05);
+    border: none;
+    border-radius: 12px;
+    color: white;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+.tab.active {
+    background: #667eea;
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
 </style>
 </head>
 <body>
 <div class="container">
     <div class="header">
-        <h1>🎬 TikTok Pro</h1>
+        <h1>🎬 AI Talking Videos</h1>
+        <span class="ai-badge">🤖 Powered by AI</span>
     </div>
     
-    <div class="card">
-        <h3>✨ المحتوى</h3>
-        <button class="btn btn-primary" onclick="generateContent()" id="genBtn">
-            🎲 توليد محتوى جديد
-        </button>
-        <div id="contentDisplay" style="display: none; margin-top: 20px;">
-            <div class="content-preview">
-                <div class="content-title" id="contentTitle"></div>
-                <div id="contentLines"></div>
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('auto')">🎲 تلقائي</button>
+        <button class="tab" onclick="switchTab('custom')">✏️ مخصص</button>
+    </div>
+    
+    <div id="autoTab" class="tab-content active">
+        <div class="card">
+            <h3>🎭 اختر الشخصية</h3>
+            <button class="btn btn-primary" onclick="generateScenario()" id="genBtn">
+                🎲 توليد سيناريو عشوائي
+            </button>
+            <div id="scenarioDisplay"></div>
+        </div>
+        
+        <div class="card" id="createCard" style="display: none;">
+            <h3>🤖 إنشاء بالذكاء الاصطناعي</h3>
+            
+            <div class="steps" id="steps">
+                <div class="step" id="step1">
+                    <div class="step-icon">🖼️</div>
+                    <div class="step-text">توليد صور الشخصية بالـ AI</div>
+                </div>
+                <div class="step" id="step2">
+                    <div class="step-icon">🎙️</div>
+                    <div class="step-text">توليد الصوت بالـ AI</div>
+                </div>
+                <div class="step" id="step3">
+                    <div class="step-icon">👄</div>
+                    <div class="step-text">مزامنة الشفايف (Lip Sync)</div>
+                </div>
+                <div class="step" id="step4">
+                    <div class="step-icon">🎬</div>
+                    <div class="step-text">تجميع الفيديو النهائي</div>
+                </div>
             </div>
-            <div class="stats">
-                <div class="stat">
-                    <div class="stat-value" id="durationStat">0</div>
-                    <div class="stat-label">ثانية</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="linesStat">0</div>
-                    <div class="stat-label">مشاهد</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value">1080p</div>
-                    <div class="stat-label">جودة</div>
-                </div>
-            </div>
+            
+            <button class="btn btn-ai" onclick="createAIVideo()" id="aiBtn">
+                ✨ إنشاء الفيديو بالـ AI
+            </button>
         </div>
     </div>
     
-    <div class="card" id="createCard" style="display: none;">
-        <h3>🎥 إنشاء الفيديو</h3>
-        <div class="recording-indicator" id="recIndicator">
-            <span class="rec-dot"></span>
-            <span>يتم التسجيل...</span>
-        </div>
-        <button class="btn btn-success" onclick="createVideo()" id="createBtn">
-            🎬 ابدأ الإنشاء
-        </button>
-        <div class="progress-bar" id="progressBar">
-            <div class="progress-fill" id="progressFill"></div>
+    <div id="customTab" class="tab-content">
+        <div class="card">
+            <h3>✏️ محتوى مخصص</h3>
+            <input type="text" class="api-key-input" id="customTitle" placeholder="عنوان الفيديو (مثال: مروحة الكمبيوتر)">
+            <textarea class="api-key-input" id="customLines" rows="4" placeholder="الحوار (سطر لكل جملة)"></textarea>
+            <button class="btn btn-primary" onclick="createCustom()">إنشاء</button>
         </div>
     </div>
     
-    <div class="video-section" id="videoSection">
+    <div class="video-container" id="videoContainer">
         <canvas id="canvas" width="1080" height="1920"></canvas>
-        <video id="previewVideo" controls playsinline></video>
+        <video id="preview" controls playsinline style="display: none;"></video>
     </div>
     
     <div class="card" id="downloadCard" style="display: none;">
-        <h3>⬇️ التحميل</h3>
-        <button class="btn btn-secondary" onclick="downloadVideo()" id="downloadBtn">
-            💾 تحميل الفيديو
-        </button>
-        <button class="btn btn-primary" onclick="shareVideo()" id="shareBtn" style="display: none;">
-            📤 مشاركة
-        </button>
+        <button class="btn btn-primary" onclick="downloadVideo()">⬇️ تحميل الفيديو</button>
     </div>
 </div>
 
 <script>
-const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-let currentContent = null;
+const sessionId = 'sess_' + Date.now();
+let currentScenario = null;
 let mediaRecorder = null;
 let recordedChunks = [];
-let animationId = null;
 
-// إعدادات الفيديو
-const CONFIG = {
-    width: 1080,
-    height: 1920,
-    fps: 60,
-    sceneDuration: 3000, // 3 ثواني لكل مشهد
-    transitionDuration: 500 // 0.5 ثانية انتقال
-};
+function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById(tab + 'Tab').classList.add('active');
+}
 
-function generateContent() {
+function generateScenario() {
     const btn = document.getElementById('genBtn');
     btn.disabled = true;
     btn.innerHTML = '⏳ جاري التوليد...';
@@ -395,52 +418,67 @@ function generateContent() {
     fetch('/generate', { headers: { 'X-Session-ID': sessionId } })
     .then(r => r.json())
     .then(data => {
-        currentContent = data;
+        currentScenario = data;
         
-        document.getElementById('contentTitle').innerText = data.title;
-        document.getElementById('contentLines').innerHTML = data.lines.map((line, i) => 
-            `<div class="content-line" style="animation-delay: ${i * 0.1}s">${line}</div>`
-        ).join('');
+        document.getElementById('scenarioDisplay').innerHTML = `
+            <div class="scenario-card" style="margin-top: 20px;">
+                <div class="scenario-title">${data.title}</div>
+                <div class="character-desc">🎭 ${data.character}</div>
+                <div style="margin-top: 15px;">
+                    ${data.lines.map((line, i) => 
+                        `<div class="dialogue-line" style="animation-delay: ${i * 0.1}s">${line}</div>`
+                    ).join('')}
+                </div>
+                <div style="margin-top: 15px; padding: 10px; background: rgba(16, 185, 129, 0.1); border-radius: 8px; color: #10b981;">
+                    😊 المزاج: ${data.voice_mood}
+                </div>
+            </div>
+        `;
         
-        document.getElementById('durationStat').innerText = data.duration;
-        document.getElementById('linesStat').innerText = data.lines.length;
-        
-        document.getElementById('contentDisplay').style.display = 'block';
         document.getElementById('createCard').style.display = 'block';
-        
-        btn.innerHTML = '🎲 توليد محتوى جديد';
+        btn.innerHTML = '🎲 توليد سيناريو عشوائي';
         btn.disabled = false;
-        
-        // Scroll to content
-        document.getElementById('contentDisplay').scrollIntoView({ behavior: 'smooth' });
     });
 }
 
-async function createVideo() {
-    if (!currentContent) return;
+async function createAIVideo() {
+    if (!currentScenario) return;
     
-    const btn = document.getElementById('createBtn');
+    const btn = document.getElementById('aiBtn');
     btn.disabled = true;
-    btn.innerHTML = '⏳ جاري التحضير...';
+    btn.innerHTML = '⏳ جاري الإنشاء...';
     
+    // عرض خطوات العمل
+    document.getElementById('steps').classList.add('active');
+    
+    // محاكاة خطوات AI (في الواقع هنا تستدعي APIs)
+    for (let i = 1; i <= 4; i++) {
+        document.getElementById('step' + i).classList.add('active');
+        await new Promise(r => setTimeout(r, 1500));
+        document.getElementById('step' + i).classList.add('done');
+        document.getElementById('step' + i).querySelector('.step-icon').innerHTML = '✓';
+    }
+    
+    // إنشاء الفيديو محلياً (محاكاة)
+    await createLocalVideo();
+    
+    btn.innerHTML = '✅ تم الإنشاء!';
+    document.getElementById('downloadCard').style.display = 'block';
+}
+
+async function createLocalVideo() {
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     
     // إعداد التسجيل
-    const stream = canvas.captureStream(CONFIG.fps);
-    const options = {
+    const stream = canvas.captureStream(30);
+    mediaRecorder = new MediaRecorder(stream, {
         mimeType: 'video/webm;codecs=vp9',
-        videoBitsPerSecond: 8000000 // 8 Mbps جودة عالية
-    };
+        videoBitsPerSecond: 5000000
+    });
     
-    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options.mimeType = 'video/webm;codecs=vp8';
-    }
-    
-    mediaRecorder = new MediaRecorder(stream, options);
     recordedChunks = [];
-    
-    mediaRecorder.ondataavailable = (e) => {
+    mediaRecorder.ondataavailable = e => {
         if (e.data.size > 0) recordedChunks.push(e.data);
     };
     
@@ -448,672 +486,188 @@ async function createVideo() {
         const blob = new Blob(recordedChunks, { type: 'video/webm' });
         const url = URL.createObjectURL(blob);
         
-        // عرض الفيديو
-        const video = document.getElementById('previewVideo');
-        video.src = url;
-        video.style.display = 'block';
+        document.getElementById('preview').src = url;
+        document.getElementById('preview').style.display = 'block';
         canvas.style.display = 'none';
         
-        document.getElementById('recIndicator').classList.remove('active');
-        document.getElementById('progressBar').classList.remove('active');
-        
-        btn.innerHTML = '✅ تم الإنشاء!';
-        
         // رفع للسيرفر
-        await uploadVideo(blob);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            fetch('/upload_video', {
+                method: 'POST',
+                headers: {
+                    'X-Session-ID': sessionId,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ video: reader.result })
+            });
+        };
+        reader.readAsDataURL(blob);
     };
     
-    // بدء التسجيل
     mediaRecorder.start(100);
-    document.getElementById('videoSection').classList.add('active');
-    document.getElementById('recIndicator').classList.add('active');
-    document.getElementById('progressBar').classList.add('active');
+    document.getElementById('videoContainer').classList.add('active');
     
-    // تشغيل الرسم والأنيميشن
-    await animateVideo(ctx, canvas, currentContent);
+    // رسم الفيديو مع "شخصية" تتكلم
+    await animateTalkingCharacter(ctx, canvas, currentScenario);
 }
 
-async function animateVideo(ctx, canvas, content) {
-    const lines = [content.title, ...content.lines];
-    const totalDuration = content.duration * 1000; // بالملي ثانية
+async function animateTalkingCharacter(ctx, canvas, scenario) {
+    const lines = scenario.lines;
+    const totalDuration = lines.length * 3000; // 3 ثواني لكل سطر
     const startTime = Date.now();
-استمر بثبات"]}
-    ]
-}
-
-def get_random_content():
-    category = random.choice(list(content_database.keys()))
-    item = random.choice(content_database[category])
-    return {
-        "category": category,
-        "title": item["title"],
-        "lines": item["lines"],
-        "duration": len(item["lines"]) * 3 + 2  # 3 ثواني لكل سطر + 2 ثواني مقدمة
-    }
-
-@app.route("/generate", methods=['GET', 'POST'])
-def generate():
-    content = get_random_content()
-    session_id = request.headers.get('X-Session-ID', 'default_' + str(int(time.time())))
-    storage[session_id] = content
-    video_storage[session_id] = None
-    return jsonify(content)
-
-@app.route("/upload_video", methods=['POST'])
-def upload_video():
-    try:
-        session_id = request.headers.get('X-Session-ID', 'default')
-        data = request.get_json()
+    
+    // رسم الشخصية (دائرة وجه بسيطة تتحرك)
+    function drawCharacter(progress, isTalking) {
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2 - 200;
+        const size = 200;
         
-        if not data or 'video' not in data:
-            return jsonify({"error": "لا يوجد فيديو"}), 400
+        // جسم الشخصية (مروحة/بطارية/إلخ)
+        ctx.save();
         
-        video_data = data['video'].split(',')[1] if ',' in data['video'] else data['video']
-        video_bytes = base64.b64decode(video_data)
-        
-        temp_dir = tempfile.mkdtemp(dir="/tmp")
-        video_path = os.path.join(temp_dir, "video.webm")
-        
-        with open(video_path, "wb") as f:
-            f.write(video_bytes)
-        
-        video_storage[session_id] = {
-            "path": video_path,
-            "duration": data.get('duration', 0)
-        }
-        
-        return jsonify({"status": "done", "duration": data.get('duration', 0)})
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/video_file")
-def video_file():
-    session_id = request.headers.get('X-Session-ID', 'default')
-    stored = video_storage.get(session_id)
-    
-    if not stored or not os.path.exists(stored["path"]):
-        return "الفيديو غير موجود", 404
-    
-    def generate():
-        with open(stored["path"], 'rb') as f:
-            while chunk := f.read(8192):
-                yield chunk
-    
-    return Response(generate(), mimetype='video/webm')
-
-@app.route("/download")
-def download():
-    session_id = request.headers.get('X-Session-ID', 'default')
-    stored = video_storage.get(session_id)
-    
-    if not stored or not os.path.exists(stored["path"]):
-        return jsonify({"error": "الفيديو غير جاهز"}), 404
-    
-    return send_file(
-        stored["path"],
-        as_attachment=True,
-        download_name="tiktok_video.webm",
-        mimetype="video/webm"
-    )
-
-HTML = """
-<!DOCTYPE html>
-<html dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>TikTok Pro Creator</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #0a0a0a;
-    color: #fff;
-    min-height: 100vh;
-    overflow-x: hidden;
-}
-.container { max-width: 600px; margin: 0 auto; padding: 20px; }
-.header {
-    text-align: center;
-    padding: 40px 20px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    margin: -20px -20px 30px -20px;
-    position: relative;
-    overflow: hidden;
-}
-.header::before {
-    content: '';
-    position: absolute;
-    top: -50%; left: -50%;
-    width: 200%; height: 200%;
-    background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
-    background-size: 20px 20px;
-    animation: move 20s linear infinite;
-}
-@keyframes move { from { transform: translate(0,0); } to { transform: translate(50px,50px); } }
-h1 { font-size: 32px; position: relative; z-index: 1; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
-.card {
-    background: linear-gradient(145deg, #1a1a2e, #16213e);
-    padding: 25px;
-    border-radius: 24px;
-    margin-bottom: 20px;
-    border: 1px solid rgba(255,255,255,0.1);
-    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-}
-.card h3 {
-    font-size: 18px;
-    color: #a78bfa;
-    margin-bottom: 15px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.content-preview {
-    background: rgba(102, 126, 234, 0.1);
-    padding: 20px;
-    border-radius: 16px;
-    border-right: 4px solid #667eea;
-}
-.content-title {
-    font-size: 24px;
-    font-weight: bold;
-    color: #fff;
-    margin-bottom: 15px;
-    line-height: 1.4;
-}
-.content-line {
-    background: rgba(255,255,255,0.05);
-    padding: 12px 16px;
-    border-radius: 12px;
-    margin: 8px 0;
-    font-size: 16px;
-    color: #e0e0e0;
-    position: relative;
-    padding-right: 30px;
-}
-.content-line::before {
-    content: '→';
-    position: absolute;
-    right: 10px;
-    color: #667eea;
-}
-.btn {
-    width: 100%;
-    padding: 18px 24px;
-    border: none;
-    border-radius: 16px;
-    font-size: 18px;
-    font-weight: 700;
-    cursor: pointer;
-    margin: 10px 0;
-    transition: all 0.3s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    position: relative;
-    overflow: hidden;
-}
-.btn::before {
-    content: '';
-    position: absolute;
-    top: 0; left: -100%;
-    width: 100%; height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-    transition: left 0.5s;
-}
-.btn:hover::before { left: 100%; }
-.btn-primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
-}
-.btn-secondary {
-    background: rgba(255,255,255,0.1);
-    color: white;
-    border: 2px solid #667eea;
-}
-.btn-success {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-    color: white;
-}
-.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
-.btn:active:not(:disabled) { transform: scale(0.98); }
-.video-section {
-    background: #000;
-    border-radius: 24px;
-    padding: 20px;
-    margin-top: 20px;
-    display: none;
-}
-.video-section.active { display: block; }
-#canvas {
-    width: 100%;
-    border-radius: 16px;
-    background: #000;
-}
-#previewVideo {
-    width: 100%;
-    border-radius: 16px;
-    display: none;
-}
-.progress-bar {
-    width: 100%;
-    height: 6px;
-    background: rgba(255,255,255,0.1);
-    border-radius: 3px;
-    margin: 20px 0;
-    overflow: hidden;
-    display: none;
-}
-.progress-bar.active { display: block; }
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #667eea, #764ba2);
-    width: 0%;
-    transition: width 0.3s;
-}
-.stats {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 15px;
-    margin-top: 20px;
-}
-.stat {
-    text-align: center;
-    padding: 15px;
-    background: rgba(255,255,255,0.05);
-    border-radius: 12px;
-}
-.stat-value {
-    font-size: 24px;
-    font-weight: bold;
-    color: #667eea;
-}
-.stat-label {
-    font-size: 12px;
-    color: #888;
-    margin-top: 5px;
-}
-.recording-indicator {
-    display: none;
-    align-items: center;
-    gap: 10px;
-    color: #ef4444;
-    font-weight: bold;
-    margin-bottom: 15px;
-}
-.recording-indicator.active { display: flex; }
-.rec-dot {
-    width: 12px;
-    height: 12px;
-    background: #ef4444;
-    border-radius: 50%;
-    animation: pulse 1s infinite;
-}
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-</style>
-</head>
-<body>
-<div class="container">
-    <div class="header">
-        <h1>🎬 TikTok Pro</h1>
-    </div>
-    
-    <div class="card">
-        <h3>✨ المحتوى</h3>
-        <button class="btn btn-primary" onclick="generateContent()" id="genBtn">
-            🎲 توليد محتوى جديد
-        </button>
-        <div id="contentDisplay" style="display: none; margin-top: 20px;">
-            <div class="content-preview">
-                <div class="content-title" id="contentTitle"></div>
-                <div id="contentLines"></div>
-            </div>
-            <div class="stats">
-                <div class="stat">
-                    <div class="stat-value" id="durationStat">0</div>
-                    <div class="stat-label">ثانية</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="linesStat">0</div>
-                    <div class="stat-label">مشاهد</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value">1080p</div>
-                    <div class="stat-label">جودة</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="card" id="createCard" style="display: none;">
-        <h3>🎥 إنشاء الفيديو</h3>
-        <div class="recording-indicator" id="recIndicator">
-            <span class="rec-dot"></span>
-            <span>يتم التسجيل...</span>
-        </div>
-        <button class="btn btn-success" onclick="createVideo()" id="createBtn">
-            🎬 ابدأ الإنشاء
-        </button>
-        <div class="progress-bar" id="progressBar">
-            <div class="progress-fill" id="progressFill"></div>
-        </div>
-    </div>
-    
-    <div class="video-section" id="videoSection">
-        <canvas id="canvas" width="1080" height="1920"></canvas>
-        <video id="previewVideo" controls playsinline></video>
-    </div>
-    
-    <div class="card" id="downloadCard" style="display: none;">
-        <h3>⬇️ التحميل</h3>
-        <button class="btn btn-secondary" onclick="downloadVideo()" id="downloadBtn">
-            💾 تحميل الفيديو
-        </button>
-        <button class="btn btn-primary" onclick="shareVideo()" id="shareBtn" style="display: none;">
-            📤 مشاركة
-        </button>
-    </div>
-</div>
-
-<script>
-const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-let currentContent = null;
-let mediaRecorder = null;
-let recordedChunks = [];
-let animationId = null;
-
-// إعدادات الفيديو
-const CONFIG = {
-    width: 1080,
-    height: 1920,
-    fps: 60,
-    sceneDuration: 3000, // 3 ثواني لكل مشهد
-    transitionDuration: 500 // 0.5 ثانية انتقال
-};
-
-function generateContent() {
-    const btn = document.getElementById('genBtn');
-    btn.disabled = true;
-    btn.innerHTML = '⏳ جاري التوليد...';
-    
-    fetch('/generate', { headers: { 'X-Session-ID': sessionId } })
-    .then(r => r.json())
-    .then(data => {
-        currentContent = data;
-        
-        document.getElementById('contentTitle').innerText = data.title;
-        document.getElementById('contentLines').innerHTML = data.lines.map((line, i) => 
-            `<div class="content-line" style="animation-delay: ${i * 0.1}s">${line}</div>`
-        ).join('');
-        
-        document.getElementById('durationStat').innerText = data.duration;
-        document.getElementById('linesStat').innerText = data.lines.length;
-        
-        document.getElementById('contentDisplay').style.display = 'block';
-        document.getElementById('createCard').style.display = 'block';
-        
-        btn.innerHTML = '🎲 توليد محتوى جديد';
-        btn.disabled = false;
-        
-        // Scroll to content
-        document.getElementById('contentDisplay').scrollIntoView({ behavior: 'smooth' });
-    });
-}
-
-async function createVideo() {
-    if (!currentContent) return;
-    
-    const btn = document.getElementById('createBtn');
-    btn.disabled = true;
-    btn.innerHTML = '⏳ جاري التحضير...';
-    
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    // إعداد التسجيل
-    const stream = canvas.captureStream(CONFIG.fps);
-    const options = {
-        mimeType: 'video/webm;codecs=vp9',
-        videoBitsPerSecond: 8000000 // 8 Mbps جودة عالية
-    };
-    
-    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options.mimeType = 'video/webm;codecs=vp8';
-    }
-    
-    mediaRecorder = new MediaRecorder(stream, options);
-    recordedChunks = [];
-    
-    mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedChunks.push(e.data);
-    };
-    
-    mediaRecorder.onstop = async () => {
-        const blob = new Blob(recordedChunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        
-        // عرض الفيديو
-        const video = document.getElementById('previewVideo');
-        video.src = url;
-        video.style.display = 'block';
-        canvas.style.display = 'none';
-        
-        document.getElementById('recIndicator').classList.remove('active');
-        document.getElementById('progressBar').classList.remove('active');
-        
-        btn.innerHTML = '✅ تم الإنشاء!';
-        
-        // رفع للسيرفر
-        await uploadVideo(blob);
-    };
-    
-    // بدء التسجيل
-    mediaRecorder.start(100);
-    document.getElementById('videoSection').classList.add('active');
-    document.getElementById('recIndicator').classList.add('active');
-    document.getElementById('progressBar').classList.add('active');
-    
-    // تشغيل الرسم والأنيميشن
-    await animateVideo(ctx, canvas, currentContent);
-}
-
-async function animateVideo(ctx, canvas, content) {
-    const lines = [content.title, ...content.lines];
-    const totalDuration = content.duration * 1000; // بالملي ثانية
-    const startTime = Date.now();
-    let currentScene = 0;
-    
-    function render() {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / totalDuration, 1);
-        
-        // تحديث شريط التقدم
-        document.getElementById('progressFill').style.width = (progress * 100) + '%';
-        
-        // حساب المشهد الحالي
-        const sceneIndex = Math.min(
-            Math.floor(elapsed / CONFIG.sceneDuration),
-            lines.length - 1
-        );
-        
-        // رسم المشهد
-        drawScene(ctx, canvas, lines, sceneIndex, elapsed);
-        
-        if (elapsed < totalDuration) {
-            animationId = requestAnimationFrame(render);
-        } else {
-            // إيقاف التسجيل
-            setTimeout(() => {
-                if (mediaRecorder.state !== 'inactive') {
-                    mediaRecorder.stop();
-                }
-                document.getElementById('downloadCard').style.display = 'block';
-                document.getElementById('downloadCard').scrollIntoView({ behavior: 'smooth' });
-            }, 500);
-        }
-    }
-    
-    render();
-}
-
-function drawScene(ctx, canvas, lines, sceneIndex, elapsed) {
-    const w = canvas.width;
-    const h = canvas.height;
-    const sceneElapsed = elapsed % CONFIG.sceneDuration;
-    const transitionProgress = Math.min(sceneElapsed / CONFIG.transitionDuration, 1);
-    
-    // خلفية متدرجة متحركة
-    const hue = (elapsed / 50) % 360;
-    const gradient = ctx.createLinearGradient(0, 0, w, h);
-    gradient.addColorStop(0, `hsl(${hue}, 70%, 20%)`);
-    gradient.addColorStop(0.5, `hsl(${(hue + 60) % 360}, 70%, 15%)`);
-    gradient.addColorStop(1, `hsl(${(hue + 120) % 360}, 70%, 20%)`);
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, w, h);
-    
-    // جزيئات متحركة
-    drawParticles(ctx, w, h, elapsed);
-    
-    // تأثير الانتقال
-    const easeOut = 1 - Math.pow(1 - transitionProgress, 3);
-    
-    // رسم النص الرئيسي (العنوان)
-    if (sceneIndex === 0) {
-        drawText(ctx, lines[0], w/2, h/2, 80, '#fff', easeOut, true);
-    } else {
-        // رسم العنوان بشكل أصغر في الأعلى
-        drawText(ctx, lines[0], w/2, 200, 50, 'rgba(255,255,255,0.5)', 1, false);
-        
-        // رسم السطر الحالي
-        const lineIndex = sceneIndex;
-        if (lineIndex < lines.length) {
-            drawText(ctx, lines[lineIndex], w/2, h/2, 70, '#a78bfa', easeOut, true);
-        }
-    }
-    
-    // رسم شريط التقدم في الأسفل
-    const totalScenes = lines.length;
-    const progress = sceneIndex / (totalScenes - 1);
-    ctx.fillStyle = 'rgba(255,255,255,0.1)';
-    ctx.fillRect(100, h - 100, w - 200, 10);
-    ctx.fillStyle = '#667eea';
-    ctx.fillRect(100, h - 100, (w - 200) * progress, 10);
-    
-    // رقم المشهد
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.font = '30px -apple-system, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(`${sceneIndex + 1}/${totalScenes}`, w - 100, h - 140);
-}
-
-function drawParticles(ctx, w, h, elapsed) {
-    const particleCount = 50;
-    ctx.save();
-    
-    for (let i = 0; i < particleCount; i++) {
-        const x = ((elapsed * 0.05) + (i * 100)) % w;
-        const y = ((elapsed * 0.03) + (i * 137.5)) % h;
-        const size = 2 + Math.sin(elapsed * 0.01 + i) * 2;
-        const alpha = 0.3 + Math.sin(elapsed * 0.005 + i) * 0.2;
+        // خلفية الشخصية
+        const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, size);
+        gradient.addColorStop(0, '#667eea');
+        gradient.addColorStop(1, '#764ba2');
         
         ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(167, 139, 250, ${alpha})`;
+        ctx.arc(centerX, centerY, size, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
         ctx.fill();
+        
+        // عيون
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.ellipse(centerX - 50, centerY - 30, 30, 40, 0, 0, Math.PI * 2);
+        ctx.ellipse(centerX + 50, centerY - 30, 30, 40, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // حدقة العين
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.arc(centerX - 50, centerY - 30, 15, 0, Math.PI * 2);
+        ctx.arc(centerX + 50, centerY - 30, 15, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // فم يتحرك
+        ctx.fillStyle = isTalking ? '#ff6b6b' : '#333';
+        ctx.beginPath();
+        const mouthOpen = isTalking ? Math.sin(Date.now() / 100) * 20 + 20 : 10;
+        ctx.ellipse(centerX, centerY + 50, 40, mouthOpen, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // حواجب تعبيرية
+        ctx.strokeStyle = scenario.voice_mood === 'angry' ? '#ff0000' : '#333';
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        if (scenario.voice_mood === 'angry') {
+            // حواجب مقلوبة (غاضب)
+            ctx.moveTo(centerX - 80, centerY - 80);
+            ctx.lineTo(centerX - 20, centerY - 60);
+            ctx.moveTo(centerX + 80, centerY - 80);
+            ctx.lineTo(centerX + 20, centerY - 60);
+        } else if (scenario.voice_mood === 'sad') {
+            // حواجب حزينة
+            ctx.moveTo(centerX - 80, centerY - 70);
+            ctx.lineTo(centerX - 20, centerY - 80);
+            ctx.moveTo(centerX + 80, centerY - 70);
+            ctx.lineTo(centerX + 20, centerY - 80);
+        }
+        ctx.stroke();
+        
+        ctx.restore();
     }
     
-    ctx.restore();
-}
-
-function drawText(ctx, text, x, y, fontSize, color, progress, shadow) {
-    ctx.save();
-    
-    // تأثير الدخول
-    const offsetY = (1 - progress) * 50;
-    const alpha = progress;
-    
-    ctx.translate(x, y + offsetY);
-    ctx.globalAlpha = alpha;
-    
-    if (shadow) {
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 20;
-        ctx.shadowOffsetY = 10;
-    }
-    
-    ctx.fillStyle = color;
-    ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    
-    // تقسيم النص لسطور إذا كان طويل
-    const maxWidth = 900;
-    const words = text.split(' ');
-    const lines = [];
-    let currentLine = words[0];
-    
-    for (let i = 1; i < words.length; i++) {
-        const width = ctx.measureText(currentLine + ' ' + words[i]).width;
-        if (width < maxWidth) {
-            currentLine += ' ' + words[i];
+    function draw() {
+        const elapsed = Date.now() - startTime;
+        const progress = elapsed / totalDuration;
+        
+        // خلفية
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // جزيئات
+        for (let i = 0; i < 30; i++) {
+            ctx.fillStyle = `rgba(102, 126, 234, ${0.1 + Math.sin(elapsed/500 + i) * 0.1})`;
+            ctx.beginPath();
+            ctx.arc(
+                (i * 100 + elapsed/10) % canvas.width,
+                (i * 137 + elapsed/20) % canvas.height,
+                3,
+                0, Math.PI * 2
+            );
+            ctx.fill();
+        }
+        
+        // السطر الحالي
+        const currentLine = Math.min(Math.floor(elapsed / 3000), lines.length - 1);
+        const isTalking = (elapsed % 3000) < 2500; // يتكلم 2.5 ثانية من كل 3
+        
+        // رسم الشخصية
+        drawCharacter(progress, isTalking);
+        
+        // صندوق الكلام
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(50, canvas.height - 400, canvas.width - 100, 250);
+        ctx.strokeStyle = '#667eea';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(50, canvas.height - 400, canvas.width - 100, 250);
+        
+        // النص
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 50px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // تقسيم النص لسطور
+        const words = lines[currentLine].split(' ');
+        const line1 = words.slice(0, Math.ceil(words.length/2)).join(' ');
+        const line2 = words.slice(Math.ceil(words.length/2)).join(' ');
+        
+        ctx.fillText(line1, canvas.width/2, canvas.height - 300);
+        if (line2) ctx.fillText(line2, canvas.width/2, canvas.height - 230);
+        
+        // مؤشر من يتكلم
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath();
+        ctx.moveTo(100, canvas.height - 420);
+        ctx.lineTo(130, canvas.height - 420);
+        ctx.lineTo(115, canvas.height - 400);
+        ctx.fill();
+        
+        if (elapsed < totalDuration) {
+            requestAnimationFrame(draw);
         } else {
-            lines.push(currentLine);
-            currentLine = words[i];
+            mediaRecorder.stop();
         }
     }
-    lines.push(currentLine);
     
-    // رسم السطور
-    const lineHeight = fontSize * 1.4;
-    const totalHeight = lines.length * lineHeight;
-    const startY = -(totalHeight / 2) + (lineHeight / 2);
-    
-    lines.forEach((line, i) => {
-        ctx.fillText(line, 0, startY + (i * lineHeight));
-    });
-    
-    ctx.restore();
+    draw();
 }
 
-async function uploadVideo(blob) {
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-        const base64 = reader.result;
-        
-        await fetch('/upload_video', {
-            method: 'POST',
-            headers: {
-                'X-Session-ID': sessionId,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                video: base64,
-                duration: currentContent.duration
-            })
-        });
+function createCustom() {
+    const title = document.getElementById('customTitle').value;
+    const lines = document.getElementById('customLines').value.split('\n').filter(l => l.trim());
+    
+    if (!title || lines.length === 0) {
+        alert('املأ جميع الحقول');
+        return;
+    }
+    
+    currentScenario = {
+        title: title,
+        lines: lines,
+        voice_mood: 'neutral',
+        character: 'custom character'
     };
-    reader.readAsDataURL(blob);
+    
+    createLocalVideo();
 }
 
 function downloadVideo() {
     window.open(`/download?t=${Date.now()}`, '_blank');
 }
-
-function shareVideo() {
-    if (navigator.share) {
-        navigator.share({
-            title: 'TikTok Pro Video',
-            text: 'شاهد هذا الفيديو الرائع!',
-            url: window.location.href
-        });
-    }
-}
-
-// توليد تلقائي
-window.onload = () => setTimeout(generateContent, 500);
 </script>
 </body>
 </html>
