@@ -1,32 +1,37 @@
-from flask import Flask, render_template_string, jsonify, send_file, request
+from flask import Flask, render_template_string, jsonify, send_file, request, Response
 import random
 import os
 import tempfile
+import base64
 import subprocess
-import json
 
 app = Flask(__name__)
 
-# تخزين مؤقت بسيط (في Render البيانات تروح لو الـ dyno restart)
 storage = {}
+video_storage = {}
 
 ideas = [
     "3 أشياء مستحيل تعرفها",
-    "سر خطير محد يقولك",
+    "سر خطير محد يقولك", 
     "وش يصير لو ما نمت يومين؟",
     "أغرب حقيقة في العالم",
     "لماذا نتثاءب؟",
     "سر النجاح في 30 ثانية",
     "أغرب طعام في العالم",
-    "هل تعلم؟"
+    "هل تعلم؟",
+    "خطأ فادح يرتكبه الجميع",
+    "السر اللي ما يعرفه أحد",
+    "لا تسوي كذا أبداً",
+    "معلومة صادمة"
 ]
 
 scripts = [
+    ["واحد...", "اثنين...", "ثلاثة... انتهى!"],
     ["هل تعلم أن...", "في شيء غريب...", "تابع للنهاية"],
     ["99% ما يعرفون...", "لكن الحقيقة...", "صدمة"],
     ["هذا الشيء خطير...", "انتبه له...", "لا تسوي كذا"],
-    ["واحد...", "اثنين...", "ثلاثة... انتهى!"],
-    ["انتبه...", "الحين جاي الصدمة...", "شوف بنفسك"]
+    ["انتبه...", "الحين جاي الصدمة...", "شوف بنفسك"],
+    ["الكل يظن...", "بس الواقع...", "غير كذا تماماً"]
 ]
 
 @app.route("/generate", methods=['GET', 'POST'])
@@ -34,496 +39,445 @@ def generate():
     idea = random.choice(ideas)
     script = random.choice(scripts)
     
-    # تخزين في الجلسة باستخدام معرف فريد
     session_id = request.headers.get('X-Session-ID', 'default')
-    storage[session_id] = {
-        "idea": idea,
-        "script": script
-    }
+    storage[session_id] = {"idea": idea, "script": script}
+    video_storage[session_id] = None
     
-    return jsonify({
-        "idea": idea,
-        "script": script,
-        "session": session_id
-    })
+    return jsonify({"idea": idea, "script": script})
 
-@app.route("/video", methods=['POST'])
-def video():
+@app.route("/upload_video", methods=['POST'])
+def upload_video():
+    """استقبال الفيديو من المتصفح"""
     try:
         session_id = request.headers.get('X-Session-ID', 'default')
-        data = storage.get(session_id, {})
+        data = request.get_json()
         
-        if not data.get("idea"):
-            return jsonify({"error": "ولد فكرة أولاً"}), 400
-
-        idea = data["idea"]
-        script_lines = data["script"]
+        if not data or 'video' not in data:
+            return jsonify({"error": "لا يوجد فيديو"}), 400
         
-        # إنشاء ملف SRT للترجمة (التوقيت)
-        srt_content = ""
-        duration_per_line = 2  # ثانيتين لكل سطر
-        for i, line in enumerate([idea] + script_lines):
-            start = i * duration_per_line
-            end = start + duration_per_line
-            srt_content += f"{i+1}\n"
-            srt_content += f"00:00:{start:02d},000 --> 00:00:{end:02d},000\n"
-            srt_content += f"{line}\n\n"
+        # فك تشفير base64
+        video_data = data['video'].split(',')[1] if ',' in data['video'] else data['video']
+        video_bytes = base64.b64decode(video_data)
         
-        # حفظ الملفات في /tmp (الوحيد المسموح في Render)
+        # حفظ في /tmp
         temp_dir = tempfile.mkdtemp(dir="/tmp")
-        srt_path = os.path.join(temp_dir, "subtitles.srt")
+        webm_path = os.path.join(temp_dir, "video.webm")
+        mp4_path = os.path.join(temp_dir, "video.mp4")
         
-        with open(srt_path, "w", encoding="utf-8") as f:
-            f.write(srt_content)
+        with open(webm_path, "wb") as f:
+            f.write(video_bytes)
         
-        # إنشاء فيديو باستخدام FFmpeg مباشرة (أخف من MoviePy)
-        output_path = os.path.join(temp_dir, "output.mp4")
+        # محاولة تحويل لـ MP4 باستخدام FFmpeg لو موجود
+        try:
+            subprocess.run([
+                "ffmpeg", "-i", webm_path, 
+                "-c:v", "libx264", "-preset", "fast",
+                "-movflags", "+faststart",
+                "-y", mp4_path
+            ], check=True, capture_output=True, timeout=30)
+            
+            if os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 1000:
+                final_path = mp4_path
+                os.remove(webm_path)  # مسح الـ webm
+            else:
+                final_path = webm_path
+        except:
+            # لو FFmpeg ما اشتغل، نرجع WebM
+            final_path = webm_path
         
-        # نص الفيديو الكامل
-        full_text = " | ".join([idea] + script_lines)
-        
-        # استخدام FFmpeg لإنشاء فيديو مع نص
-        # نستخدم drawtext مع خط يدعم العربية
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-f", "lavfi",
-            "-i", f"color=c=black:s=720x1280:d={len([idea]+script_lines)*2}",
-            "-vf",
-            f"drawtext=text='{full_text}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:"
-            f"fontsize=40:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.5,"
-            f"format=yuv420p",
-            "-c:v", "libx264",
-            "-t", str(len([idea]+script_lines)*2),
-            "-pix_fmt", "yuv420p",
-            "-y",
-            output_path
-        ]
-        
-        # تنفيذ الأمر
-        result = subprocess.run(
-            ffmpeg_cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        if result.returncode != 0:
-            # إذا فشل FFmpeg، نرجع HTML animation كبديل
-            return jsonify({
-                "status": "html_fallback",
-                "message": "تم إنشاء معاينة HTML (FFmpeg غير متوفر)",
-                "data": data
-            })
-        
-        # حفظ المسار في التخزين
-        storage[session_id + "_video"] = output_path
+        video_storage[session_id] = final_path
         
         return jsonify({
             "status": "done",
-            "duration": len([idea] + script_lines) * 2
+            "duration": data.get('duration', 0)
         })
         
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "انتهى الوقت"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/video_file")
+def video_file():
+    session_id = request.headers.get('X-Session-ID', 'default')
+    path = video_storage.get(session_id)
+    
+    if not path or not os.path.exists(path):
+        return "الفيديو غير موجود", 404
+    
+    def generate():
+        with open(path, 'rb') as f:
+            while chunk := f.read(8192):
+                yield chunk
+    
+    mime = 'video/mp4' if path.endswith('.mp4') else 'video/webm'
+    return Response(generate(), mimetype=mime)
 
 @app.route("/download")
 def download():
-    try:
-        session_id = request.headers.get('X-Session-ID', 'default')
-        video_path = storage.get(session_id + "_video")
-        
-        if not video_path or not os.path.exists(video_path):
-            # إرجاع فيديو HTML5 كبديل
-            return jsonify({
-                "error": "الفيديو غير موجود",
-                "fallback": "use_html_version"
-            }), 404
-            
-        return send_file(
-            video_path,
-            as_attachment=True,
-            download_name="swiftstore_video.mp4",
-            mimetype="video/mp4"
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok", "service": "SwiftStore"})
+    session_id = request.headers.get('X-Session-ID', 'default')
+    path = video_storage.get(session_id)
+    
+    if not path or not os.path.exists(path):
+        return jsonify({"error": "الفيديو غير جاهز"}), 404
+    
+    ext = 'mp4' if path.endswith('.mp4') else 'webm'
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=f"tiktok_video.{ext}",
+        mimetype=f"video/{ext}"
+    )
 
 HTML = """
 <!DOCTYPE html>
 <html dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SwiftStore - Render</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>TikTok Bot</title>
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 body {
     margin: 0;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
     color: #fff;
     min-height: 100vh;
-    overflow-x: hidden;
+    padding-bottom: 30px;
 }
-.container {
-    max-width: 1200px;
-    margin: auto;
-    padding: 40px 20px;
-}
-h1 {
+.container { max-width: 500px; margin: auto; padding: 20px; }
+.header {
     text-align: center;
-    font-size: clamp(2rem, 5vw, 3.5rem);
-    margin-bottom: 40px;
-    background: linear-gradient(135deg, #9d50bb, #6e48aa);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    animation: glow 2s ease-in-out infinite alternate;
+    padding: 30px 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 0 0 30px 30px;
+    margin: -20px -20px 30px -20px;
 }
-@keyframes glow {
-    from { filter: drop-shadow(0 0 10px rgba(157,80,187,0.5)); }
-    to { filter: drop-shadow(0 0 20px rgba(157,80,187,0.8)); }
-}
-.grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 30px;
-}
+h1 { font-size: 28px; font-weight: bold; }
 .card {
-    background: rgba(31, 28, 61, 0.8);
-    padding: 30px;
+    background: rgba(255,255,255,0.05);
+    padding: 25px;
     border-radius: 20px;
-    box-shadow: 0 0 30px rgba(157,80,187,0.4);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(157,80,187,0.2);
-    transition: all 0.3s ease;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
 }
-.card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 40px rgba(157,80,187,0.6);
-}
-.full {
-    grid-column: 1 / -1;
+.card h3 { font-size: 20px; margin-bottom: 15px; color: #a78bfa; }
+.idea-box {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 20px;
+    border-radius: 15px;
+    font-size: 22px;
+    font-weight: bold;
     text-align: center;
 }
-button {
-    padding: 14px 28px;
-    border: none;
-    border-radius: 12px;
-    background: linear-gradient(135deg, #9d50bb, #6e48aa);
-    color: #fff;
-    cursor: pointer;
-    font-size: 16px;
-    margin: 10px 5px;
-    transition: all 0.3s;
-    font-weight: bold;
-    position: relative;
-    overflow: hidden;
-}
-button::before {
-    content: '';
-    position: absolute;
-    top: 0; left: -100%;
-    width: 100%; height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-    transition: left 0.5s;
-}
-button:hover::before {
-    left: 100%;
-}
-button:hover {
-    transform: scale(1.05);
-    box-shadow: 0 5px 20px rgba(157,80,187,0.4);
-}
-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none !important;
-}
-.idea {
-    font-size: 24px;
-    margin-top: 20px;
-    padding: 20px;
-    background: linear-gradient(135deg, #2a244a, #1f1c3d);
-    border-radius: 15px;
-    min-height: 60px;
-    border-right: 5px solid #9d50bb;
-    line-height: 1.6;
-}
-.script p {
-    background: linear-gradient(135deg, #2a244a, #1f1c3d);
-    padding: 15px 20px;
-    border-radius: 12px;
-    margin: 12px 0;
-    font-size: 18px;
-    border-right: 4px solid #6e48aa;
-    animation: slideIn 0.5s ease;
-}
-@keyframes slideIn {
-    from { opacity: 0; transform: translateX(-20px); }
-    to { opacity: 1; transform: translateX(0); }
-}
-.status {
-    margin-top: 20px;
+.script-line {
+    background: rgba(102, 126, 234, 0.2);
     padding: 15px;
     border-radius: 12px;
-    display: none;
+    margin: 10px 0;
+    font-size: 18px;
+    border-right: 4px solid #667eea;
+    text-align: center;
+}
+.btn {
+    width: 100%;
+    padding: 18px;
+    border: none;
+    border-radius: 15px;
+    font-size: 18px;
     font-weight: bold;
-    animation: fadeIn 0.3s ease;
+    cursor: pointer;
+    margin: 10px 0;
+    transition: all 0.3s;
 }
-.status.success { 
-    background: linear-gradient(135deg, #4caf50, #45a049);
-    display: block;
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
 }
-.status.error { 
-    background: linear-gradient(135deg, #f44336, #da190b);
-    display: block;
+.btn-secondary {
+    background: rgba(255,255,255,0.1);
     color: white;
+    border: 2px solid #667eea;
 }
-.status.loading {
-    background: linear-gradient(135deg, #2196f3, #1976d2);
-    display: block;
-    color: white;
+.btn:disabled { opacity: 0.5; }
+.video-container {
+    margin-top: 20px;
+    border-radius: 20px;
+    overflow: hidden;
+    background: black;
+    display: none;
+    position: relative;
 }
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+video { width: 100%; display: block; }
+#canvas { display: none; }
+.status-bar {
+    padding: 15px;
+    border-radius: 12px;
+    margin: 15px 0;
+    text-align: center;
+    font-weight: bold;
+    display: none;
 }
+.status-bar.show { display: block; }
+.status-bar.success { background: #10b981; }
+.status-bar.error { background: #ef4444; }
+.status-bar.loading { background: #3b82f6; }
 .spinner {
     display: inline-block;
     width: 20px;
     height: 20px;
-    border: 3px solid rgba(255,255,255,.3);
+    border: 3px solid rgba(255,255,255,0.3);
+    border-top-color: white;
     border-radius: 50%;
-    border-top-color: #fff;
-    animation: spin 1s ease-in-out infinite;
+    animation: spin 1s linear infinite;
     margin-left: 10px;
-    vertical-align: middle;
 }
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-#videoPreview {
-    margin-top: 30px;
-    display: none;
-    border-radius: 20px;
-    overflow: hidden;
-    box-shadow: 0 0 40px rgba(157,80,187,0.5);
-}
-video {
-    width: 100%;
-    max-width: 400px;
-    border-radius: 20px;
-}
-.html-preview {
-    width: 100%;
-    max-width: 400px;
-    height: 711px;
-    background: linear-gradient(135deg, #0f0c29, #302b63);
-    border-radius: 20px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    padding: 40px;
-    margin: 0 auto;
-    position: relative;
-    overflow: hidden;
-}
-.html-preview::before {
-    content: '';
+@keyframes spin { to { transform: rotate(360deg); } }
+.recording-badge {
     position: absolute;
-    top: -50%; left: -50%;
-    width: 200%; height: 200%;
-    background: radial-gradient(circle, rgba(157,80,187,0.1) 0%, transparent 70%);
-    animation: rotate 20s linear infinite;
+    top: 10px;
+    right: 10px;
+    background: red;
+    color: white;
+    padding: 5px 15px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: bold;
+    display: none;
+    animation: pulse 1s infinite;
 }
-@keyframes rotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-.preview-text {
-    font-size: 32px;
-    text-align: center;
-    margin: 20px 0;
-    z-index: 1;
-    text-shadow: 0 2px 10px rgba(0,0,0,0.5);
-    opacity: 0;
-    animation: textPop 0.5s forwards;
-}
-@keyframes textPop {
-    to { opacity: 1; transform: scale(1); }
-}
-.preview-line {
-    font-size: 24px;
-    margin: 10px 0;
-    padding: 10px 20px;
-    background: rgba(255,255,255,0.1);
-    border-radius: 10px;
-    z-index: 1;
-    opacity: 0;
-}
-@media (max-width: 768px) {
-    .container { padding: 20px; }
-    .card { padding: 20px; }
-}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 </style>
 </head>
 <body>
 <div class="container">
-    <h1>🚀 SwiftStore</h1>
-    <div class="grid">
-        <div class="card">
-            <h3>🎯 الفكرة</h3>
-            <button onclick="generate()" id="genBtn">توليد فكرة جديدة</button>
-            <div id="idea" class="idea">اضغط "توليد" للحصول على فكرة</div>
+    <div class="header">
+        <h1>🎬 TikTok Bot</h1>
+    </div>
+    
+    <div class="card">
+        <h3>💡 الفكرة</h3>
+        <button class="btn btn-primary" onclick="generate()" id="genBtn">🔄 توليد فكرة</button>
+        <div class="idea-box" id="idea">اضغط "توليد" للبدء</div>
+    </div>
+    
+    <div class="card">
+        <h3>📝 السكربت</h3>
+        <div id="script"><div class="script-line" style="opacity: 0.5;">...</div></div>
+    </div>
+    
+    <div class="card">
+        <h3>🎥 الفيديو</h3>
+        <button class="btn btn-primary" onclick="startRecording()" id="recordBtn" disabled>
+            🎬 تسجيل الفيديو
+        </button>
+        <button class="btn btn-secondary" onclick="downloadVideo()" id="downloadBtn" disabled>
+            ⬇️ تحميل الفيديو
+        </button>
+        
+        <div id="status" class="status-bar"></div>
+        
+        <div id="videoContainer" class="video-container">
+            <div class="recording-badge" id="recBadge">🔴 يتم التسجيل</div>
+            <video id="preview" controls playsinline></video>
         </div>
-        <div class="card">
-            <h3>📝 السكربت</h3>
-            <div id="script" class="script">
-                <p style="color: #888; border: none; background: transparent;">السكربت سيظهر هنا...</p>
-            </div>
-        </div>
-        <div class="card full">
-            <h3>🎬 إنشاء الفيديو</h3>
-            <button onclick="makeVideo()" id="vidBtn" disabled>🎥 إنشاء فيديو</button>
-            <button onclick="download()" id="dlBtn" disabled>⬇️ تحميل الفيديو</button>
-            <div id="status" class="status"></div>
-            <div id="videoPreview"></div>
-        </div>
+        
+        <canvas id="canvas" width="720" height="1280"></canvas>
     </div>
 </div>
 
 <script>
-// توليد معرف فريد للجلسة
-const sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+const sessionId = 'sess_' + Date.now();
 let currentData = null;
+let mediaRecorder = null;
+let recordedChunks = [];
 
-function showStatus(msg, type='loading') {
+function showStatus(msg, type) {
     const s = document.getElementById('status');
-    s.innerHTML = msg + (type === 'loading' ? '<span class="spinner"></span>' : '');
-    s.className = 'status ' + type;
-    if (type !== 'loading') {
-        setTimeout(() => s.className = 'status', 4000);
-    }
+    s.innerHTML = type === 'loading' ? msg + '<span class="spinner"></span>' : msg;
+    s.className = 'status-bar show ' + type;
 }
 
-function generate(){
-    const btn = document.getElementById('genBtn');
-    btn.disabled = true;
-    showStatus('جاري التوليد...');
+function generate() {
+    document.getElementById('genBtn').disabled = true;
+    showStatus('جاري التوليد...', 'loading');
     
-    fetch('/generate', {
-        headers: { 'X-Session-ID': sessionId }
-    })
-    .then(res => res.json())
+    fetch('/generate', { headers: { 'X-Session-ID': sessionId } })
+    .then(r => r.json())
     .then(data => {
         currentData = data;
         document.getElementById('idea').innerText = data.idea;
+        document.getElementById('script').innerHTML = data.script.map(line => 
+            `<div class="script-line">${line}</div>`
+        ).join('');
         
-        const scriptDiv = document.getElementById('script');
-        scriptDiv.innerHTML = data.script.map((x, i) => 
-            `<p style="animation-delay: ${i * 0.1}s">${x}</p>`
-        ).join("");
+        document.getElementById('recordBtn').disabled = false;
+        document.getElementById('downloadBtn').disabled = true;
+        document.getElementById('videoContainer').style.display = 'none';
         
-        document.getElementById('vidBtn').disabled = false;
-        document.getElementById('dlBtn').disabled = true;
-        document.getElementById('videoPreview').style.display = 'none';
-        
-        showStatus('✅ تم التوليد بنجاح', 'success');
-        btn.disabled = false;
-    })
-    .catch(err => {
-        showStatus('❌ خطأ: ' + err.message, 'error');
-        btn.disabled = false;
+        showStatus('✅ تم التوليد!', 'success');
+        setTimeout(() => document.getElementById('status').className = 'status-bar', 2000);
+        document.getElementById('genBtn').disabled = false;
     });
 }
 
-function makeVideo(){
-    if(!currentData) return;
+async function startRecording() {
+    if (!currentData) return;
     
-    const btn = document.getElementById('vidBtn');
+    const btn = document.getElementById('recordBtn');
     btn.disabled = true;
-    showStatus('جاري إنشاء الفيديو... قد يستغرق 10-20 ثانية');
+    showStatus('جاري تحضير التسجيل...', 'loading');
     
-    fetch('/video', {
-        method: 'POST',
-        headers: { 
-            'X-Session-ID': sessionId,
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(r => r.json())
-    .then(d => {
-        if(d.status === 'done'){
-            showStatus('✅ تم إنشاء الفيديو!', 'success');
-            document.getElementById('dlBtn').disabled = false;
-            showVideoPreview();
-        } else if (d.status === 'html_fallback') {
-            showStatus('⚠️ ' + d.message, 'success');
-            showHTMLPreview(d.data);
-            document.getElementById('dlBtn').disabled = false;
-        } else {
-            showStatus('❌ خطأ: ' + (d.error || 'غير معروف'), 'error');
-        }
-        btn.disabled = false;
-    })
-    .catch(err => {
-        showStatus('❌ خطأ في الاتصال: ' + err.message, 'error');
-        btn.disabled = false;
-    });
-}
-
-function showVideoPreview() {
-    const preview = document.getElementById('videoPreview');
-    preview.innerHTML = `
-        <video controls autoplay loop muted>
-            <source src="/download?session=${sessionId}" type="video/mp4">
-            المتصفح لا يدعم الفيديو
-        </video>
-    `;
-    preview.style.display = 'block';
-}
-
-function showHTMLPreview(data) {
-    const preview = document.getElementById('videoPreview');
-    preview.innerHTML = `
-        <div class="html-preview">
-            <div class="preview-text" style="animation-delay: 0s">${data.idea}</div>
-            ${data.script.map((line, i) => 
-                `<div class="preview-line" style="animation: textPop 0.5s ${(i+1)*0.5}s forwards">${line}</div>`
-            ).join('')}
-        </div>
-    `;
-    preview.style.display = 'block';
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const stream = canvas.captureStream(30); // 30 FPS
     
-    // إعادة تشغيل الأنيميشن
+    // إعدادات التسجيل
+    const options = { mimeType: 'video/webm;codecs=vp9' };
+    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options.mimeType = 'video/webm;codecs=vp8';
+    }
+    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options.mimeType = 'video/webm';
+    }
+    
+    mediaRecorder = new MediaRecorder(stream, options);
+    recordedChunks = [];
+    
+    mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+    
+    mediaRecorder.onstop = async () => {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        
+        // عرض الفيديو
+        const video = document.getElementById('preview');
+        video.src = url;
+        document.getElementById('videoContainer').style.display = 'block';
+        document.getElementById('recBadge').style.display = 'none';
+        
+        showStatus('⬆️ جاري رفع الفيديو...', 'loading');
+        
+        // تحويل لـ base64 ورفعه
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+            const base64 = reader.result;
+            
+            const res = await fetch('/upload_video', {
+                method: 'POST',
+                headers: {
+                    'X-Session-ID': sessionId,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    video: base64,
+                    duration: 8
+                })
+            });
+            
+            const result = await res.json();
+            if (result.status === 'done') {
+                showStatus('✅ تم حفظ الفيديو!', 'success');
+                document.getElementById('downloadBtn').disabled = false;
+                btn.disabled = false;
+            } else {
+                showStatus('❌ فشل الرفع', 'error');
+                btn.disabled = false;
+            }
+        };
+        reader.readAsDataURL(blob);
+    };
+    
+    // بدء التسجيل
+    mediaRecorder.start(100); // جمع البيانات كل 100ms
+    
+    // رسم الفيديو
+    await renderVideo(ctx, canvas, currentData);
+    
+    // إيقاف التسجيل بعد 8 ثواني
     setTimeout(() => {
-        const el = preview.querySelector('.html-preview');
-        el.style.display = 'none';
-        el.offsetHeight; // trigger reflow
-        el.style.display = 'flex';
-    }, 100);
+        if (mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+        }
+    }, 8000);
 }
 
-function download(){
-    if(document.getElementById('dlBtn').disabled) return;
+async function renderVideo(ctx, canvas, data) {
+    const lines = [data.idea, ...data.script];
+    const frameDuration = 2000; // 2 ثانية لكل سطر
+    const startTime = Date.now();
     
-    // فتح في تبويب جديد
-    window.open(`/download?session=${sessionId}`, '_blank');
+    document.getElementById('recBadge').style.display = 'block';
+    document.getElementById('videoContainer').style.display = 'block';
+    
+    function draw() {
+        const elapsed = Date.now() - startTime;
+        const currentIndex = Math.min(Math.floor(elapsed / frameDuration), lines.length - 1);
+        
+        // خلفية متدرجة
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, '#0f0c29');
+        gradient.addColorStop(0.5, '#302b63');
+        gradient.addColorStop(1, '#24243e');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // تأثيرات خفيفة
+        ctx.save();
+        ctx.globalAlpha = 0.1;
+        for (let i = 0; i < 5; i++) {
+            ctx.beginPath();
+            ctx.arc(
+                Math.random() * canvas.width,
+                Math.random() * canvas.height,
+                Math.random() * 100 + 50,
+                0, Math.PI * 2
+            );
+            ctx.fillStyle = '#9d50bb';
+            ctx.fill();
+        }
+        ctx.restore();
+        
+        // رسم النص
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // العنوان الرئيسي
+        ctx.font = 'bold 60px -apple-system, sans-serif';
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 10;
+        ctx.fillText(lines[0], canvas.width/2, canvas.height/2 - 100);
+        
+        // السطر الحالي من السكربت
+        if (currentIndex > 0) {
+            ctx.font = '50px -apple-system, sans-serif';
+            ctx.fillStyle = '#a78bfa';
+            ctx.fillText(lines[currentIndex], canvas.width/2, canvas.height/2 + 100);
+        }
+        
+        // مؤشر التقدم
+        const progress = (elapsed % frameDuration) / frameDuration;
+        ctx.fillStyle = '#9d50bb';
+        ctx.fillRect(50, canvas.height - 50, (canvas.width - 100) * progress, 10);
+        
+        if (elapsed < 8000) {
+            requestAnimationFrame(draw);
+        }
+    }
+    
+    draw();
+}
+
+function downloadVideo() {
+    // فتح الفيديو في تبويب جديد للتحميل
+    window.open(`/download?t=${Date.now()}`, '_blank');
     showStatus('⬇️ جاري التحميل...', 'success');
 }
 
-// توليد فكرة تلقائياً عند التحميل
-window.onload = () => {
-    setTimeout(generate, 500);
-};
+// توليد تلقائي
+window.onload = () => setTimeout(generate, 500);
 </script>
 </body>
 </html>
@@ -535,4 +489,4 @@ def home():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port)
