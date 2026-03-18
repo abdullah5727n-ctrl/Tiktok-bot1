@@ -1,24 +1,23 @@
 from flask import Flask, render_template_string, jsonify, send_file
-import random, os
-from moviepy.editor import *
-from gtts import gTTS
+import random
+from moviepy.editor import TextClip
 
 app = Flask(__name__)
 
 ideas = [
-    "3 أشياء مستحيل تعرفها 😳",
-    "سر خطير محد يقولك 🔥",
-    "وش يصير لو ما نمت يومين؟ 😨",
-    "أغرب حقيقة في العالم 🤯"
+    "3 أشياء مستحيل تعرفها",
+    "سر خطير محد يقولك",
+    "وش يصير لو ما نمت يومين؟",
+    "أغرب حقيقة في العالم"
 ]
 
 scripts = [
-    ["هل تعلم أن...", "في شيء غريب...", "تابع للنهاية 😳"],
-    ["99% ما يعرفون...", "لكن الحقيقة...", "صدمة 🔥"],
-    ["هذا الشيء خطير...", "انتبه له...", "لا تسوي كذا 😨"]
+    ["هل تعلم أن...", "في شيء غريب...", "تابع للنهاية"],
+    ["99% ما يعرفون...", "لكن الحقيقة...", "صدمة"],
+    ["هذا الشيء خطير...", "انتبه له...", "لا تسوي كذا"]
 ]
 
-current = {"idea":"", "script":[]}
+current = {"idea": "", "script": []}
 
 @app.route("/generate")
 def generate():
@@ -28,31 +27,23 @@ def generate():
 
 @app.route("/video")
 def video():
-    text = current["idea"] + ". " + " ".join(current["script"])
+    try:
+        text = current["idea"] + "\n" + "\n".join(current["script"])
 
-    # 🔊 صوت
-    tts = gTTS(text=text, lang='ar')
-    tts.save("voice.mp3")
-    audio = AudioFileClip("voice.mp3")
+        clip = TextClip(
+            text,
+            fontsize=60,
+            color='white',
+            bg_color='black',
+            size=(720, 1280),
+            method='caption'
+        ).set_duration(6)
 
-    # 🎥 خلفية
-    bg = VideoFileClip("bg.mp4").subclip(0,10).resize((720,1280))
+        clip.write_videofile("output.mp4", fps=24)
 
-    # ✨ تأثير Zoom
-    bg = bg.fx(vfx.resize, lambda t: 1 + 0.05*t)
-
-    # 📝 نص
-    txt = TextClip(text, fontsize=55, color='white',
-                   method='caption', size=(650,1000))\
-                   .set_position("center").set_duration(10)
-
-    # 🎵 موسيقى خفيفة (اختياري)
-    final = CompositeVideoClip([bg, txt])
-    final = final.set_audio(audio)
-
-    final.write_videofile("output.mp4", fps=24)
-
-    return jsonify({"status":"done"})
+        return jsonify({"status": "done"})
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 @app.route("/download")
 def download():
@@ -63,7 +54,7 @@ HTML = """
 <html dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>God Mode AI</title>
+<title>SwiftStore</title>
 
 <style>
 body {
@@ -72,43 +63,65 @@ body {
     background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);
     color:#fff;
 }
+
 .container {
-    max-width:1100px;
+    max-width:1200px;
     margin:auto;
-    padding:30px;
+    padding:40px;
 }
+
 h1 {
     text-align:center;
-    font-size:45px;
+    font-size:50px;
+    margin-bottom:40px;
     background:linear-gradient(135deg,#9d50bb,#6e48aa);
     -webkit-background-clip:text;
     -webkit-text-fill-color:transparent;
 }
+
 .grid {
     display:grid;
     grid-template-columns:1fr 1fr;
-    gap:20px;
+    gap:30px;
 }
+
 .card {
     background:#1f1c3d;
-    padding:20px;
-    border-radius:15px;
-    box-shadow:0 0 25px rgba(157,80,187,0.4);
+    padding:30px;
+    border-radius:20px;
+    box-shadow:0 0 30px rgba(157,80,187,0.4);
 }
+
 button {
-    padding:12px 20px;
+    padding:14px 25px;
     border:none;
-    border-radius:10px;
+    border-radius:12px;
     background:linear-gradient(135deg,#9d50bb,#6e48aa);
     color:#fff;
     cursor:pointer;
+    font-size:16px;
     margin-top:10px;
 }
+
+button:hover {
+    transform:scale(1.05);
+}
+
+.idea {
+    font-size:22px;
+    margin-top:15px;
+}
+
 .script p {
     background:#2a244a;
-    padding:10px;
-    border-radius:8px;
-    margin:5px 0;
+    padding:12px;
+    border-radius:10px;
+    margin:8px 0;
+}
+
+.full {
+    grid-column: span 2;
+    text-align:center;
 }
 </style>
 
@@ -116,43 +129,51 @@ button {
 <body>
 
 <div class="container">
-<h1>😈 GOD MODE AI</h1>
+
+<h1>SwiftStore</h1>
 
 <div class="grid">
 
 <div class="card">
-<h3>🎯 الفكرة</h3>
-<button onclick="gen()">توليد</button>
-<div id="idea"></div>
+<h3>الفكرة</h3>
+<button onclick="generate()">توليد</button>
+<div id="idea" class="idea"></div>
 </div>
 
 <div class="card">
-<h3>📜 السكربت</h3>
+<h3>السكربت</h3>
 <div id="script" class="script"></div>
 </div>
 
-<div class="card">
-<h3>🎬 الفيديو</h3>
-<button onclick="make()">إنشاء فيديو</button>
-<button onclick="download()">تحميل</button>
+<div class="card full">
+<h3>الفيديو</h3>
+<button onclick="makeVideo()">إنشاء فيديو</button>
+<button onclick="download()">تحميل الفيديو</button>
 </div>
 
 </div>
+
 </div>
 
 <script>
-function gen(){
+function generate(){
 fetch('/generate')
-.then(r=>r.json())
-.then(d=>{
-document.getElementById('idea').innerText=d.idea
-document.getElementById('script').innerHTML=
-d.script.map(x=>"<p>"+x+"</p>").join("")
+.then(res=>res.json())
+.then(data=>{
+document.getElementById('idea').innerText = data.idea
+document.getElementById('script').innerHTML =
+data.script.map(x=>"<p>"+x+"</p>").join("")
 })
 }
 
-function make(){
-fetch('/video').then(()=>alert("🔥 تم إنشاء الفيديو"))
+function makeVideo(){
+fetch('/video').then(r=>r.json()).then(d=>{
+if(d.status){
+alert("تم إنشاء الفيديو")
+}else{
+alert("خطأ: " + d.error)
+}
+})
 }
 
 function download(){
